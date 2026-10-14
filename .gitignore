@@ -1,0 +1,10 @@
+# Downloaded tool binaries (fetched by Scripts/fetch-tools.sh)
+Vendor/bin/
+
+# Xcode
+xcuserdata/
+build/
+DerivedData/
+*.xcarchive
+.DS_Store
+dist/
