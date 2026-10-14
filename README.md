@@ -119,3 +119,7 @@ Scripts/
   deno.entitlements        Hardened-runtime exceptions for Deno
 Vendor/bin/                Fetched binaries (git-ignored)
 ```
+
+## License
+
+MIT, see [LICENSE](LICENSE). yt-dlp, ffmpeg, ffprobe and Deno keep their own licenses.
