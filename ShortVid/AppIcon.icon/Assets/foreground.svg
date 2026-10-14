@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- ShortVid glyph for the Icon Composer icon: a film frame catching a down arrow.
+     Same geometry as Tools/make-icon.swift (160-unit grid × 6.4 onto the 1024 canvas). -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <!-- Sprocket strips, translucent so they read as part of the frame -->
+  <rect x="217.6" y="332.8" width="89.6" height="409.6" rx="25.6" fill="#ffffff" fill-opacity="0.45"/>
+  <rect x="716.8" y="332.8" width="89.6" height="409.6" rx="25.6" fill="#ffffff" fill-opacity="0.45"/>
+  <!-- Frame outline -->
+  <rect x="217.6" y="332.8" width="588.8" height="409.6" rx="64" fill="none" stroke="#ffffff" stroke-width="57.6" stroke-linejoin="round"/>
+  <!-- Arrow shaft and head -->
+  <rect x="483.2" y="140.8" width="57.6" height="422.4" rx="28.8" fill="#ffffff"/>
+  <polyline points="384,448 512,588.8 640,448" fill="none" stroke="#ffffff" stroke-width="57.6" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
