@@ -55,9 +55,11 @@ The app icon is generated, not drawn by hand: `swift Tools/make-icon.swift
 ShortVid/Assets.xcassets/AppIcon.appiconset` rewrites the macOS icon set, and
 `swift Tools/make-icon.swift --site shortvid.png` produces the 320 px tile the
 website uses. `ShortVid/AppIcon.icon` is the same glyph as an Icon Composer icon
-(a gradient fill plus `foreground.svg`); macOS 26 and later render that layered
-icon, and Shortcuts shows a blank placeholder on placed actions for apps that
-ship only the bitmap icon set, so keep both in sync.
+(a gradient fill plus `foreground.svg`), which macOS 26 and later render; keep
+both in sync. Shortcuts draws a generic placeholder on the Download Video action
+once it is placed in a shortcut: it loads icons for App Intents actions from the
+app's App Store listing, and ShortVid has none. The action library and shortcut
+tiles use the local icon and are fine.
 
 The project is macOS-only and arm64-only, because the bundled helpers are arm64
 builds. Intel support would just mean fetching x86_64 helpers and building universal.
@@ -123,7 +125,7 @@ ShortVid/
   ShortVidApp.swift        App entry point
   AppUpdater.swift         Sparkle updater behind "Check for Updates…"
   Info.plist               Sparkle feed URL and public key (merged into the generated Info.plist)
-  AppIcon.icon/            Icon Composer icon (gradient + foreground.svg), used by macOS 26+ and Shortcuts
+  AppIcon.icon/            Icon Composer icon (gradient + foreground.svg), used by macOS 26+
   ContentView.swift        Status window + "Try it" tester
   DownloadVideoIntent.swift The App Intent exposed to Shortcuts
   VideoDownloader.swift    yt-dlp invocation (format selector), ffprobe check, ffmpeg conversion
