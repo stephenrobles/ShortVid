@@ -19,7 +19,7 @@ struct DownloadVideoIntent: AppIntent {
 
     @Parameter(
         title: "Quality",
-        description: "Highest quality takes the best streams available; 1080p, 720p and 480p cap the resolution and use less space.",
+        description: "Highest quality takes the best streams that fit the MP4 setting; 4K takes the best stream up to 2160p even when it must be converted; 1080p, 720p and 480p cap the resolution and use less space.",
         default: .highest
     )
     var quality: VideoQuality
@@ -47,9 +47,12 @@ struct DownloadVideoIntent: AppIntent {
 }
 
 /// Resolution cap for the download. yt-dlp picks the best streams whose
-/// frame height fits; "Highest quality" leaves it uncapped.
+/// frame height fits; "Highest quality" leaves it uncapped. "4K" also puts
+/// resolution ahead of codec, so a VP9/AV1 2160p stream wins over a 1080p
+/// H.264 one even with Force MP4 on (and is converted afterwards).
 nonisolated enum VideoQuality: String, AppEnum {
     case highest
+    case p2160
     case p1080
     case p720
     case p480
@@ -57,6 +60,7 @@ nonisolated enum VideoQuality: String, AppEnum {
     static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "Quality")
     static let caseDisplayRepresentations: [VideoQuality: DisplayRepresentation] = [
         .highest: "Highest quality",
+        .p2160: "4K",
         .p1080: "1080p",
         .p720: "720p",
         .p480: "480p",
@@ -66,11 +70,17 @@ nonisolated enum VideoQuality: String, AppEnum {
     var maxHeight: Int? {
         switch self {
         case .highest: return nil
+        case .p2160: return 2160
         case .p1080: return 1080
         case .p720: return 720
         case .p480: return 480
         }
     }
+
+    /// Whether resolution beats codec when choosing streams. Only 4K does:
+    /// sites such as YouTube offer 2160p only as VP9/AV1, which Force MP4's
+    /// H.264-first selection would otherwise skip in favor of 1080p.
+    var prefersResolutionOverCodec: Bool { self == .p2160 }
 }
 
 struct ShortVidShortcuts: AppShortcutsProvider {

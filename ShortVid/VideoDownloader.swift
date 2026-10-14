@@ -73,11 +73,11 @@ nonisolated enum VideoDownloader {
     /// that already fit in an MP4 without re-encoding before anything else.
     /// A height cap applies to every video alternative, with an uncapped
     /// "best" at the end so a site that only offers larger streams still works.
-    static func formatSelector(maxHeight: Int?, preferMP4: Bool) -> String? {
+    static func formatSelector(maxHeight: Int?, preferMP4: Bool, resolutionFirst: Bool = false) -> String? {
         let cap = maxHeight.map { "[height<=\($0)]" } ?? ""
         guard preferMP4 || maxHeight != nil else { return nil }   // yt-dlp's default is already bv*+ba/b
         var alternatives: [String] = []
-        if preferMP4 {
+        if preferMP4, !resolutionFirst {
             alternatives += [
                 "bv*[vcodec~='^(avc1|h264|hev1|hvc1)'][ext=mp4]\(cap)+ba[acodec~='^mp4a'][ext=m4a]",
                 "bv*[ext=mp4]\(cap)+ba[ext=m4a]",
@@ -87,6 +87,15 @@ nonisolated enum VideoDownloader {
         alternatives += ["bv*\(cap)+ba", "b\(cap)"]
         if maxHeight != nil { alternatives.append("b") }
         return alternatives.joined(separator: "/")
+    }
+
+    /// yt-dlp's format-sort fields for the resolution-first case (4K): the
+    /// largest video up to the cap wins, and H.264 + AAC only break ties, so
+    /// an MP4-ready stream is still taken when the site has one at that size.
+    static func formatSort(maxHeight: Int, preferMP4: Bool) -> String {
+        var fields = ["res:\(maxHeight)"]
+        if preferMP4 { fields += ["vcodec:h264", "acodec:aac", "ext:mp4:m4a"] }
+        return fields.joined(separator: ",")
     }
 
     private static func runYtdlp(_ ytdlp: YtdlpInstallation, url: URL, into directory: URL, quality: VideoQuality, preferMP4: Bool) async throws -> URL {
@@ -106,8 +115,12 @@ nonisolated enum VideoDownloader {
             // Print the final path (after merge/move) as the only stdout line.
             "--print", "after_move:filepath",
         ]
-        if let format = formatSelector(maxHeight: quality.maxHeight, preferMP4: preferMP4) {
+        let resolutionFirst = quality.prefersResolutionOverCodec
+        if let format = formatSelector(maxHeight: quality.maxHeight, preferMP4: preferMP4, resolutionFirst: resolutionFirst) {
             arguments += ["--format", format]
+        }
+        if resolutionFirst, let maxHeight = quality.maxHeight {
+            arguments += ["--format-sort", formatSort(maxHeight: maxHeight, preferMP4: preferMP4)]
         }
         arguments.append(url.absoluteString)
 

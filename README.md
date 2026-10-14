@@ -14,7 +14,7 @@ Downie-style. It bundles [yt-dlp](https://github.com/yt-dlp/yt-dlp) for extracti
 | Parameter | Type | Notes |
 | --- | --- | --- |
 | URL | URL | A video page or a direct link to a media file. |
-| Quality | Highest quality (default), 1080p, 720p, 480p | Caps the frame height yt-dlp will pick (`[height<=…]` in the format selector); the best streams that fit are used. If a site only offers larger streams, the best available is taken rather than failing. |
+| Quality | Highest quality (default), 4K, 1080p, 720p, 480p | 1080p, 720p and 480p cap the frame height yt-dlp will pick (`[height<=…]` in the format selector); the best streams that fit are used. If a site only offers larger streams, the best available is taken rather than failing. Highest quality leaves the cap off but, with Force MP4 on, still prefers H.264/HEVC sources so nothing is re-encoded, which on YouTube means 1080p (its 2160p streams are VP9/AV1 only). 4K puts resolution first (yt-dlp `--format-sort res:2160,vcodec:h264,…`): the largest stream up to 2160p wins, H.264 and AAC only break ties, and a VP9/AV1 result is converted to H.264 afterwards, which takes a while. |
 | Force MP4 | toggle, on by default | Deliver an H.264/HEVC + AAC MP4 that QuickTime and Photos can play. Streams that already fit are remuxed without re-encoding; anything else (VP9, AV1, Opus, MKV, WebM) is converted with ffmpeg, using the hardware encoder when possible. Off: whatever yt-dlp's best quality is, in its native container. |
 
 Output: a **File**, which can go straight into Save File, Share, Quick Look, Save to Photos, etc.

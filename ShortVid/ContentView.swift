@@ -45,6 +45,7 @@ struct ContentView: View {
                     HStack {
                         Picker("Quality", selection: $tester.quality) {
                             Text("Highest quality").tag(VideoQuality.highest)
+                            Text("4K").tag(VideoQuality.p2160)
                             Text("1080p").tag(VideoQuality.p1080)
                             Text("720p").tag(VideoQuality.p720)
                             Text("480p").tag(VideoQuality.p480)
