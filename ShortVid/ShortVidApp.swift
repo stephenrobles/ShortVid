@@ -3,6 +3,7 @@ import SwiftUI
 @main
 struct ShortVidApp: App {
     @State private var updater = YtdlpUpdater()
+    @State private var appUpdater = AppUpdater()
 
     var body: some Scene {
         Window("ShortVid", id: "main") {
@@ -12,6 +13,8 @@ struct ShortVidApp: App {
         .windowResizability(.contentSize)
         .commands {
             CommandGroup(after: .appInfo) {
+                Button("Check for Updates…") { appUpdater.checkForUpdates() }
+                    .disabled(!appUpdater.canCheckForUpdates)
                 UpdateYtdlpMenuItem(updater: updater)
             }
         }

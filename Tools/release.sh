@@ -1,16 +1,20 @@
 #!/bin/zsh
 # Builds a Release app signed with Developer ID (helpers included, via the bundle-tools.sh
-# run-script phase), optionally notarizes it, packages a DMG, and optionally copies the DMG
-# into the beardfm.app site. Nothing here deploys the site: run `npm run deploy` there yourself.
+# run-script phase, and Sparkle's nested code re-signed inside-out), optionally notarizes it,
+# packages a DMG, and optionally publishes it on beardfm.app: the download for new users plus a
+# Sparkle update for existing users. Nothing here deploys the site: run `npm run deploy` there yourself.
 #
 # Usage:  Tools/release.sh [--notarize] [--publish]
 #   --notarize   uses the notarytool keychain profile in $NOTARY_PROFILE (default "ipodpromax-notary",
 #                the team-wide profile shared with the other beardfm.app apps). Create one with:
 #                xcrun notarytool store-credentials <name> --apple-id you@example.com --team-id J9228F689B
 #   --publish    (requires --notarize) uploads the DMG to the beardfm.app R2 bucket (beardfm-downloads) as
-#                ShortVid-<version>.dmg and ShortVid.dmg, which the site's worker serves at /downloads/<name>.
+#                ShortVid-<version>.dmg and ShortVid.dmg, which the site's worker serves at /downloads/<name>,
+#                signs the DMG for Sparkle with the EdDSA key in the keychain (account "shortvid"), and adds it
+#                to site/static/shortvid/appcast.xml (with release-notes/<version>.html if present).
 #                The DMG is too big for the site's static assets (25 MiB per file), so it never goes in
-#                site/static/downloads. Update the version and size on site/pages/shortvid.html by hand.
+#                site/static/downloads. Update the version and size on site/pages/shortvid.html by hand,
+#                then deploy the site so the appcast (and with it the update) goes live.
 #
 # Output: dist/ShortVid <version>.dmg
 set -euo pipefail
@@ -41,7 +45,7 @@ rm -rf "$BUILD"
 mkdir -p "$BUILD" "$DIST"
 
 # Xcode signs the app and, through Scripts/bundle-tools.sh, each helper with this identity,
-# hardened runtime and the helpers' entitlements, so nothing needs re-signing afterwards.
+# hardened runtime and the helpers' entitlements.
 # CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO keeps the "build" action from adding get-task-allow,
 # which notarization rejects, and OTHER_CODE_SIGN_FLAGS adds the secure timestamp notarization
 # requires (the "archive" action does both on its own).
@@ -57,9 +61,24 @@ VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" "$APP/Co
 BUILDNUM=$(/usr/libexec/PlistBuddy -c "Print CFBundleVersion" "$APP/Contents/Info.plist")
 echo "▶ Version $VERSION ($BUILDNUM)"
 
+# Sparkle ships pre-signed; re-sign its nested code inside-out (per Sparkle's docs) with our identity,
+# hardened runtime and a timestamp, then the app once more so its seal covers the re-signed framework.
+# The helpers in Contents/Helpers keep the signatures and entitlements bundle-tools.sh gave them.
+echo "▶ Signing Sparkle…"
+SPARKLE="$APP/Contents/Frameworks/Sparkle.framework"
+[[ -d "$SPARKLE" ]] || { echo "Sparkle.framework is missing from the app."; exit 1; }
+sign() { codesign --force --options runtime --timestamp --sign "$DEVID" "$@"; }
+sign "$SPARKLE/Versions/B/XPCServices/Installer.xpc"
+sign --preserve-metadata=entitlements "$SPARKLE/Versions/B/XPCServices/Downloader.xpc"
+sign "$SPARKLE/Versions/B/Autoupdate"
+sign "$SPARKLE/Versions/B/Updater.app"
+sign "$SPARKLE"
+sign "$APP"
+
 echo "▶ Verifying signatures…"
 codesign --verify --strict --deep --verbose=2 "$APP"
-for item in "$APP" "$APP"/Contents/Helpers/*; do
+for item in "$APP" "$APP"/Contents/Helpers/* "$SPARKLE" "$SPARKLE/Versions/B/Autoupdate" "$SPARKLE/Versions/B/Updater.app" \
+            "$SPARKLE/Versions/B/XPCServices/Installer.xpc" "$SPARKLE/Versions/B/XPCServices/Downloader.xpc"; do
   info=$(codesign -dvv --entitlements - "$item" 2>&1)
   [[ "$info" == *"flags="*"(runtime)"* ]] || { echo "$item is not signed with the hardened runtime"; exit 1; }
   [[ "$info" == *"Authority=Developer ID Application"* ]] || { echo "$item is not signed with Developer ID"; exit 1; }
@@ -93,12 +112,26 @@ fi
 
 if [[ $PUBLISH -eq 1 ]]; then
   [[ -f "$SITE/wrangler.jsonc" ]] || { echo "beardfm.app site not found at $SITE (set BEARDFM_SITE)."; exit 1; }
+  SPARKLE_BIN=$(find "$BUILD/DerivedData/SourcePackages/artifacts" -type d -name bin -path "*parkle*" | head -1)
+  [[ -x "$SPARKLE_BIN/sign_update" ]] || { echo "Sparkle's sign_update tool wasn't found."; exit 1; }
+  echo "▶ Signing update for Sparkle…"
+  SIGNATURE=$("$SPARKLE_BIN/sign_update" --account shortvid "$DMG")
+  MIN_MACOS=$(/usr/libexec/PlistBuddy -c "Print LSMinimumSystemVersion" "$APP/Contents/Info.plist")
+  UPDATE_NAME="ShortVid-$VERSION.dmg"
+
   BUCKET="${R2_BUCKET:-beardfm-downloads}"
-  for name in "ShortVid-$VERSION.dmg" "ShortVid.dmg"; do
+  for name in "$UPDATE_NAME" "ShortVid.dmg"; do
     echo "▶ Uploading $name to R2 bucket $BUCKET…"
     (cd "$SITE" && npx wrangler r2 object put "$BUCKET/$name" --file "$DMG" --content-type application/x-apple-diskimage --remote > /dev/null)
   done
-  echo "▶ Live at https://beardfm.app/downloads/ShortVid-$VERSION.dmg and /downloads/ShortVid.dmg (the worker serves them from R2)."
+  echo "▶ Live at https://beardfm.app/downloads/$UPDATE_NAME and /downloads/ShortVid.dmg (the worker serves them from R2)."
+
+  echo "▶ Adding the update to the appcast…"
+  NOTES=()
+  [[ -f "$ROOT/release-notes/$VERSION.html" ]] && NOTES=("$ROOT/release-notes/$VERSION.html")
+  "$ROOT/Tools/update-appcast.py" "$SITE/site/static/shortvid/appcast.xml" "$VERSION" "$BUILDNUM" "$MIN_MACOS" \
+    "https://beardfm.app/downloads/$UPDATE_NAME" "$SIGNATURE" "${NOTES[@]}"
+  echo "▶ Update $VERSION ($BUILDNUM) is in site/static/shortvid/appcast.xml. Update site/pages/shortvid.html, then deploy the site (npm run deploy) to offer it."
 fi
 
 ls -la "$DMG"

@@ -26,7 +26,9 @@ cache is only a staging area.
 The app itself is just a status window: it shows the tool versions, has an
 **Update yt-dlp…** button (see below), and a "Try it" field for testing a URL without
 Shortcuts. Shortcuts launches the app hidden
-when it runs the action; it does not need to be open.
+when it runs the action; it does not need to be open. The app keeps itself current
+with [Sparkle](https://sparkle-project.org): **ShortVid ▸ Check for Updates…**, plus a
+daily automatic check.
 
 ## Building
 
@@ -66,12 +68,24 @@ friends. Distribute it directly:
 - The **Release** configuration signs with **Developer ID Application** (manual
   signing, team J9228F689B), including the helpers, so an archive is ready to notarize.
 - `Tools/release.sh --notarize --publish` does the whole thing from the command line:
-  Release build signed with Developer ID, notarize and staple the app, package
-  `dist/ShortVid <version>.dmg`, notarize and staple that too, and copy it into the
-  beardfm.app R2 bucket as `ShortVid-<version>.dmg` and `ShortVid.dmg`, which the site serves
-  at `/downloads/…` (the DMG is too big for the site's static assets).
+  Release build signed with Developer ID (Sparkle's XPC services, `Autoupdate` and
+  `Updater.app` re-signed inside-out with the hardened runtime), notarize and staple the
+  app, package `dist/ShortVid <version>.dmg`, notarize and staple that too, upload it to
+  the beardfm.app R2 bucket as `ShortVid-<version>.dmg` and `ShortVid.dmg`, which the site
+  serves at `/downloads/…` (the DMG is too big for the site's static assets), sign the DMG
+  for Sparkle, and add it to the site's `site/static/shortvid/appcast.xml`.
   It uses the team-wide `ipodpromax-notary` keychain profile and never deploys the site;
-  run `npm run deploy` there when the download should go live.
+  bump the version and size on `site/pages/shortvid.html`, then run `npm run deploy`
+  there when the download and the update should go live.
+- Bump `MARKETING_VERSION` and `CURRENT_PROJECT_VERSION` together before a release:
+  Sparkle compares the build number (`CFBundleVersion`), so it has to grow every time.
+- Updates are signed with an EdDSA key. The private key lives in the release Mac's
+  keychain under the account `shortvid` (Sparkle's `generate_keys --account shortvid`
+  made it; `generate_keys --account shortvid -x key.txt` exports it for another Mac),
+  and the matching public key is `SUPublicEDKey` in `ShortVid/Info.plist`, next to
+  `SUFeedURL` (`https://beardfm.app/shortvid/appcast.xml`). Release notes for an update
+  go in `release-notes/<version>.html`; `Tools/update-appcast.py` embeds them in the
+  appcast item, and the site's Latest Updates page reads them from there.
 
 ## Updating yt-dlp
 
@@ -104,6 +118,8 @@ signed binary and break the app's signature.
 ```
 ShortVid/
   ShortVidApp.swift        App entry point
+  AppUpdater.swift         Sparkle updater behind "Check for Updates…"
+  Info.plist               Sparkle feed URL and public key (merged into the generated Info.plist)
   ContentView.swift        Status window + "Try it" tester
   DownloadVideoIntent.swift The App Intent exposed to Shortcuts
   VideoDownloader.swift    yt-dlp invocation (format selector), ffprobe check, ffmpeg conversion
@@ -111,7 +127,9 @@ ShortVid/
   YtdlpUpdater.swift       Picks bundled vs updated yt-dlp; "Update yt-dlp…" download/verify/swap
 Tools/
   make-icon.swift          Renders the app icon set and the website icon
-  release.sh               Developer ID build, notarize, DMG, copy to beardfm.app
+  release.sh               Developer ID build, notarize, DMG, upload to beardfm.app, appcast entry
+  update-appcast.py        Adds a release to the appcast (called by release.sh)
+release-notes/             One HTML fragment per version, embedded in the appcast
 Scripts/
   fetch-tools.sh           Downloads the helper binaries into Vendor/bin
   bundle-tools.sh          Run-script phase: copy + codesign helpers
