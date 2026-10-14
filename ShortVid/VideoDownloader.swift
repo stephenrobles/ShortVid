@@ -1,5 +1,6 @@
 import AppIntents
 import Foundation
+import VideoToolbox
 import os
 
 nonisolated enum DownloadError: Error, CustomLocalizedStringResourceConvertible {
@@ -24,11 +25,18 @@ nonisolated enum DownloadError: Error, CustomLocalizedStringResourceConvertible 
 
 nonisolated struct DownloadedVideo: Sendable {
     let fileURL: URL
+    /// The video stream was re-encoded to H.264.
     let wasConverted: Bool
+    /// The streams were moved into an MP4 (and/or the audio re-encoded) without touching the video.
+    let wasRemuxed: Bool
 }
 
 /// Downloads a video with the bundled yt-dlp and, on request, makes sure the
-/// result is an MP4 that QuickTime and Photos can play (H.264/HEVC + AAC).
+/// result is an MP4. "Force MP4" keeps the downloaded video stream when this
+/// Mac can play it from an MP4 (H.264, HEVC, and AV1 where the chip decodes
+/// it), repackaging in seconds; anything else (VP9, or AV1 on older chips) is
+/// re-encoded to H.264. The "Compatible MP4" option re-encodes AV1 too, so
+/// the file also plays on older Macs and phones.
 nonisolated enum VideoDownloader {
     /// Where finished files live. Each download gets its own folder so names
     /// never collide. Folders older than `retention` are swept on each run.
@@ -40,7 +48,8 @@ nonisolated enum VideoDownloader {
 
     static let retention: TimeInterval = 24 * 60 * 60
 
-    static func download(_ url: URL, quality: VideoQuality = .highest, forceMP4: Bool) async throws -> DownloadedVideo {
+    static func download(_ url: URL, quality: VideoQuality = .highest, forceMP4: Bool, compatibleMP4: Bool = false) async throws -> DownloadedVideo {
+        let compatible = forceMP4 && compatibleMP4
         let ytdlp = await YtdlpResolver.shared.status().active
         for tool in [ytdlp.url, BundledTools.ffmpeg, BundledTools.ffprobe, BundledTools.deno] where !BundledTools.isInstalled(tool) {
             throw DownloadError.toolMissing(tool.lastPathComponent)
@@ -51,38 +60,57 @@ nonisolated enum VideoDownloader {
         let jobDirectory = downloadsDirectory.appending(path: UUID().uuidString)
         try FileManager.default.createDirectory(at: jobDirectory, withIntermediateDirectories: true)
 
-        let downloaded = try await runYtdlp(ytdlp, url: url, into: jobDirectory, quality: quality, preferMP4: forceMP4)
+        let downloaded = try await runYtdlp(ytdlp, url: url, into: jobDirectory, quality: quality, preferMP4: forceMP4, compatible: compatible)
 
         guard forceMP4 else {
-            return DownloadedVideo(fileURL: downloaded, wasConverted: false)
+            return DownloadedVideo(fileURL: downloaded, wasConverted: false, wasRemuxed: false)
         }
 
+        let allowedVideo = compatible ? MediaProbe.compatibleVideoCodecs : MediaProbe.playableMP4VideoCodecs
         let probe = try await MediaProbe.probe(downloaded)
-        if probe.isQuickTimeFriendlyMP4 {
-            return DownloadedVideo(fileURL: downloaded, wasConverted: false)
+        if probe.isMP4(allowingVideo: allowedVideo) {
+            return DownloadedVideo(fileURL: downloaded, wasConverted: false, wasRemuxed: false)
         }
 
-        let converted = try await convertToMP4(downloaded, probe: probe)
+        let (output, reencoded) = try await makeMP4(downloaded, probe: probe, allowedVideo: allowedVideo)
         try? FileManager.default.removeItem(at: downloaded)
-        return DownloadedVideo(fileURL: converted, wasConverted: true)
+        return DownloadedVideo(fileURL: output, wasConverted: reencoded, wasRemuxed: !reencoded)
     }
 
     // MARK: - yt-dlp
 
+    /// yt-dlp `vcodec` patterns for streams that go into an MP4 untouched:
+    /// H.264 and HEVC always, AV1 too unless `compatible` or the chip can't decode it.
+    static func remuxableCodecPattern(compatible: Bool) -> String {
+        var codecs = ["avc1", "h264", "hev1", "hvc1"]
+        if !compatible, MediaProbe.playableMP4VideoCodecs.contains("av1") { codecs.append("av01") }
+        return "^(" + codecs.joined(separator: "|") + ")"
+    }
+
     /// Builds the yt-dlp format selector. With `preferMP4` it tries streams
-    /// that already fit in an MP4 without re-encoding before anything else.
-    /// A height cap applies to every video alternative, with an uncapped
-    /// "best" at the end so a site that only offers larger streams still works.
-    static func formatSelector(maxHeight: Int?, preferMP4: Bool, resolutionFirst: Bool = false) -> String? {
+    /// that need no re-encoding before anything else: MP4-container video in
+    /// a codec this Mac plays (see `remuxableCodecPattern`) with AAC audio,
+    /// then any MP4 at all. A height cap applies to every video alternative,
+    /// with an uncapped "best" at the end so a site that only offers larger
+    /// streams still works.
+    static func formatSelector(maxHeight: Int?, preferMP4: Bool, compatible: Bool = false, resolutionFirst: Bool = false) -> String? {
         let cap = maxHeight.map { "[height<=\($0)]" } ?? ""
         guard preferMP4 || maxHeight != nil else { return nil }   // yt-dlp's default is already bv*+ba/b
         var alternatives: [String] = []
-        if preferMP4, !resolutionFirst {
-            alternatives += [
-                "bv*[vcodec~='^(avc1|h264|hev1|hvc1)'][ext=mp4]\(cap)+ba[acodec~='^mp4a'][ext=m4a]",
-                "bv*[ext=mp4]\(cap)+ba[ext=m4a]",
-                "b[ext=mp4]\(cap)",
-            ]
+        if preferMP4 {
+            if resolutionFirst {
+                // No codec filter here: resolution wins (see formatSort), and a
+                // codec filter would let a smaller remuxable stream beat a larger one.
+                alternatives.append("bv*\(cap)+ba[acodec~='^mp4a'][ext=m4a]")
+            } else {
+                let codec = "[vcodec~='\(remuxableCodecPattern(compatible: compatible))']"
+                alternatives += [
+                    "bv*\(codec)[ext=mp4]\(cap)+ba[acodec~='^mp4a'][ext=m4a]",
+                    "bv*[ext=mp4]\(cap)+ba[acodec~='^mp4a'][ext=m4a]",
+                    "bv*[ext=mp4]\(cap)+ba[ext=m4a]",
+                    "b[ext=mp4]\(cap)",
+                ]
+            }
         }
         alternatives += ["bv*\(cap)+ba", "b\(cap)"]
         if maxHeight != nil { alternatives.append("b") }
@@ -90,15 +118,23 @@ nonisolated enum VideoDownloader {
     }
 
     /// yt-dlp's format-sort fields for the resolution-first case (4K): the
-    /// largest video up to the cap wins, and H.264 + AAC only break ties, so
-    /// an MP4-ready stream is still taken when the site has one at that size.
-    static func formatSort(maxHeight: Int, preferMP4: Bool) -> String {
+    /// largest video up to the cap wins; a codec that needs no re-encoding
+    /// (H.264 with `compatible`, AV1 on a Mac that plays it) breaks ties, and
+    /// AAC audio and an MP4 container come next.
+    static func formatSort(maxHeight: Int, preferMP4: Bool, compatible: Bool = false) -> String {
         var fields = ["res:\(maxHeight)"]
-        if preferMP4 { fields += ["vcodec:h264", "acodec:aac", "ext:mp4:m4a"] }
+        if preferMP4 {
+            if compatible {
+                fields.append("vcodec:h264")
+            } else if MediaProbe.playableMP4VideoCodecs.contains("av1") {
+                fields.append("vcodec:av01")
+            }
+            fields += ["acodec:aac", "ext:mp4:m4a"]
+        }
         return fields.joined(separator: ",")
     }
 
-    private static func runYtdlp(_ ytdlp: YtdlpInstallation, url: URL, into directory: URL, quality: VideoQuality, preferMP4: Bool) async throws -> URL {
+    private static func runYtdlp(_ ytdlp: YtdlpInstallation, url: URL, into directory: URL, quality: VideoQuality, preferMP4: Bool, compatible: Bool) async throws -> URL {
         // ffmpeg and deno always come from the bundle, whichever yt-dlp runs.
         var arguments = [
             "--no-playlist",
@@ -116,11 +152,11 @@ nonisolated enum VideoDownloader {
             "--print", "after_move:filepath",
         ]
         let resolutionFirst = quality.prefersResolutionOverCodec
-        if let format = formatSelector(maxHeight: quality.maxHeight, preferMP4: preferMP4, resolutionFirst: resolutionFirst) {
+        if let format = formatSelector(maxHeight: quality.maxHeight, preferMP4: preferMP4, compatible: compatible, resolutionFirst: resolutionFirst) {
             arguments += ["--format", format]
         }
         if resolutionFirst, let maxHeight = quality.maxHeight {
-            arguments += ["--format-sort", formatSort(maxHeight: maxHeight, preferMP4: preferMP4)]
+            arguments += ["--format-sort", formatSort(maxHeight: maxHeight, preferMP4: preferMP4, compatible: compatible)]
         }
         arguments.append(url.absoluteString)
 
@@ -148,17 +184,28 @@ nonisolated enum VideoDownloader {
 
     // MARK: - ffmpeg
 
-    private static func convertToMP4(_ source: URL, probe: MediaProbe) async throws -> URL {
+    /// Produces an MP4 from `source`: the video stream is copied when its codec
+    /// is in `allowedVideo` and re-encoded to H.264 otherwise; audio is copied
+    /// when MP4 can hold it and re-encoded to AAC otherwise. Returns the file
+    /// and whether the video was re-encoded.
+    private static func makeMP4(_ source: URL, probe: MediaProbe, allowedVideo: Set<String>) async throws -> (URL, Bool) {
         var destination = source.deletingPathExtension().appendingPathExtension("mp4")
         if destination == source {
             destination = source.deletingPathExtension().appendingPathExtension("h264.mp4")
         }
 
-        let copyVideo = probe.videoCodec.map(MediaProbe.mp4VideoCodecs.contains) ?? false
+        let copyVideo = probe.videoCodec.map(allowedVideo.contains) ?? false
         let copyAudio = probe.audioCodec.map(MediaProbe.mp4AudioCodecs.contains) ?? true
 
+        // Decode in hardware when VideoToolbox handles the source codec (AV1 on
+        // M3 and later, HEVC and H.264 everywhere); otherwise ffmpeg decodes in
+        // software, which is what VP9 gets.
+        let hardwareDecode = !copyVideo && (probe.videoCodec.map(MediaProbe.hardwareDecodes) ?? false)
+
         func arguments(videoEncoder: [String]) -> [String] {
-            var args = ["-hide_banner", "-nostdin", "-y", "-i", source.path, "-map", "0:v:0", "-map", "0:a:0?"]
+            var args = ["-hide_banner", "-nostdin", "-y"]
+            if hardwareDecode { args += ["-hwaccel", "videotoolbox"] }
+            args += ["-i", source.path, "-map", "0:v:0", "-map", "0:a:0?"]
             args += copyVideo ? ["-c:v", "copy"] : videoEncoder
             args += copyAudio ? ["-c:a", "copy"] : ["-c:a", "aac", "-b:a", "192k"]
             args += ["-movflags", "+faststart", destination.path]
@@ -177,7 +224,7 @@ nonisolated enum VideoDownloader {
         guard result.succeeded, FileManager.default.fileExists(atPath: destination.path) else {
             throw DownloadError.conversionFailed(summarize(result.stderr))
         }
-        return destination
+        return (destination, !copyVideo)
     }
 
     // MARK: - Housekeeping
@@ -216,12 +263,35 @@ nonisolated struct MediaProbe: Sendable {
     let videoCodec: String?
     let audioCodec: String?
 
-    static let mp4VideoCodecs: Set<String> = ["h264", "hevc"]
+    /// Video codecs that play everywhere, older devices included.
+    static let compatibleVideoCodecs: Set<String> = ["h264", "hevc"]
+    /// Video codecs this Mac plays from an MP4: the compatible ones plus AV1
+    /// when the chip decodes it (M3 and later). VP9 in MP4 is not playable
+    /// by AVFoundation even on Apple silicon, so it is always re-encoded.
+    static var playableMP4VideoCodecs: Set<String> {
+        var codecs = compatibleVideoCodecs
+        if hardwareDecodes("av1") { codecs.insert("av1") }
+        return codecs
+    }
     static let mp4AudioCodecs: Set<String> = ["aac", "mp3", "alac"]
 
-    var isQuickTimeFriendlyMP4: Bool {
+    /// Whether VideoToolbox decodes the (ffprobe-named) codec in hardware.
+    static func hardwareDecodes(_ codec: String) -> Bool {
+        let type: CMVideoCodecType
+        switch codec {
+        case "h264": type = kCMVideoCodecType_H264
+        case "hevc": type = kCMVideoCodecType_HEVC
+        case "vp9": type = kCMVideoCodecType_VP9
+        case "av1": type = kCMVideoCodecType_AV1
+        default: return false
+        }
+        return VTIsHardwareDecodeSupported(type)
+    }
+
+    /// Whether the file is already an MP4 whose streams need no work.
+    func isMP4(allowingVideo allowedVideo: Set<String>) -> Bool {
         guard containerExtension == "mp4" else { return false }
-        guard let videoCodec, Self.mp4VideoCodecs.contains(videoCodec) else { return false }
+        guard let videoCodec, allowedVideo.contains(videoCodec) else { return false }
         if let audioCodec, !Self.mp4AudioCodecs.contains(audioCodec) { return false }
         return true
     }

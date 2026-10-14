@@ -19,27 +19,42 @@ struct DownloadVideoIntent: AppIntent {
 
     @Parameter(
         title: "Quality",
-        description: "Highest quality takes the best streams that fit the MP4 setting; 4K takes the best stream up to 2160p even when it must be converted; 1080p, 720p and 480p cap the resolution and use less space.",
+        description: "Highest quality takes the best streams that fit the MP4 settings; 4K takes the best stream up to 2160p even when it must be converted; 1080p, 720p and 480p cap the resolution and use less space.",
         default: .highest
     )
     var quality: VideoQuality
 
     @Parameter(
         title: "Force MP4",
-        description: "Deliver an H.264 MP4 that QuickTime and Photos can play, converting with ffmpeg when the source isn't one already.",
+        description: "Deliver an MP4. Video this Mac can play from an MP4 (H.264, HEVC, and AV1 on M3 and later) is repackaged in seconds without re-encoding; anything else, such as VP9, is converted to H.264 with ffmpeg.",
         default: true
     )
     var forceMP4: Bool
 
+    @Parameter(
+        title: "Compatible MP4 (H.264)",
+        description: "Also re-encode AV1 video to H.264 so the file plays on older Macs, iPhones and other devices. Slower, and larger files.",
+        default: false
+    )
+    var compatibleMP4: Bool
+
     static var parameterSummary: some ParameterSummary {
-        Summary("Download video at \(\.$url)") {
-            \.$quality
-            \.$forceMP4
+        When(\.$forceMP4, .equalTo, true) {
+            Summary("Download video at \(\.$url)") {
+                \.$quality
+                \.$forceMP4
+                \.$compatibleMP4
+            }
+        } otherwise: {
+            Summary("Download video at \(\.$url)") {
+                \.$quality
+                \.$forceMP4
+            }
         }
     }
 
     func perform() async throws -> some IntentResult & ReturnsValue<IntentFile> {
-        let video = try await VideoDownloader.download(url, quality: quality, forceMP4: forceMP4)
+        let video = try await VideoDownloader.download(url, quality: quality, forceMP4: forceMP4, compatibleMP4: compatibleMP4)
         let type = UTType(filenameExtension: video.fileURL.pathExtension) ?? .movie
         let file = IntentFile(fileURL: video.fileURL, filename: video.fileURL.lastPathComponent, type: type)
         return .result(value: file)
@@ -49,7 +64,7 @@ struct DownloadVideoIntent: AppIntent {
 /// Resolution cap for the download. yt-dlp picks the best streams whose
 /// frame height fits; "Highest quality" leaves it uncapped. "4K" also puts
 /// resolution ahead of codec, so a VP9/AV1 2160p stream wins over a 1080p
-/// H.264 one even with Force MP4 on (and is converted afterwards).
+/// H.264 one even with Compatible MP4 on (and is converted afterwards).
 nonisolated enum VideoQuality: String, AppEnum {
     case highest
     case p2160
@@ -78,8 +93,8 @@ nonisolated enum VideoQuality: String, AppEnum {
     }
 
     /// Whether resolution beats codec when choosing streams. Only 4K does:
-    /// sites such as YouTube offer 2160p only as VP9/AV1, which Force MP4's
-    /// H.264-first selection would otherwise skip in favor of 1080p.
+    /// sites such as YouTube offer 2160p only as VP9/AV1, which Compatible
+    /// MP4's H.264-first selection would otherwise skip in favor of 1080p.
     var prefersResolutionOverCodec: Bool { self == .p2160 }
 }
 

@@ -52,6 +52,9 @@ struct ContentView: View {
                         }
                         .fixedSize()
                         Toggle("Force MP4", isOn: $tester.forceMP4)
+                        if tester.forceMP4 {
+                            Toggle("Compatible (H.264)", isOn: $tester.compatibleMP4)
+                        }
                         Spacer()
                         if tester.isRunning {
                             ProgressView().controlSize(.small)
@@ -167,6 +170,10 @@ struct ContentView: View {
                 Text("Converted to H.264 MP4 with ffmpeg.")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+            } else if video.wasRemuxed {
+                Text("Repackaged as MP4 without re-encoding the video.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         case .failed(let message):
             Label(message, systemImage: "exclamationmark.triangle.fill")
@@ -200,6 +207,7 @@ final class DownloadTester {
     var urlText = ""
     var quality: VideoQuality = .highest
     var forceMP4 = true
+    var compatibleMP4 = false
     private(set) var state: State = .idle
     private var task: Task<Void, Never>?
 
@@ -218,10 +226,11 @@ final class DownloadTester {
         guard let url, !isRunning else { return }
         state = .running
         let forceMP4 = forceMP4
+        let compatibleMP4 = compatibleMP4
         let quality = quality
         task = Task {
             do {
-                let video = try await VideoDownloader.download(url, quality: quality, forceMP4: forceMP4)
+                let video = try await VideoDownloader.download(url, quality: quality, forceMP4: forceMP4, compatibleMP4: compatibleMP4)
                 state = .finished(video)
             } catch is CancellationError {
                 state = .idle
