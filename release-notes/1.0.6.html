@@ -3,3 +3,13 @@
   <li>Fixes "HTTP Error 403: Forbidden" and "The page needs to be reloaded" on some YouTube videos: the bundled yt-dlp is now the 2026.10.10 nightly build, which switches to a YouTube client that still works.</li>
   <li><b>Update yt-dlp…</b> now checks yt-dlp's nightly builds as well as its releases and installs whichever is newer, so future YouTube fixes arrive without waiting for a release.</li>
 </ul>
+<h2>A Download Video action for Shortcuts</h2>
+<ul>
+  <li>Give the action a link from YouTube, Vimeo, TikTok, Instagram, X or any of the hundreds of sites yt-dlp supports, or a direct link to a media file, and it hands the video file to the next action: Save File, Share, Quick Look, Save to Photos, Transcriber, Captioner.</li>
+  <li><b>Quality:</b> Highest quality, 4K, 1080p, 720p, 480p, or <b>Audio only</b>, which returns an M4A.</li>
+  <li><b>Force MP4</b> (on by default) delivers a file QuickTime and Photos play. Video the Mac already plays from an MP4 (H.264, HEVC, and AV1 on M3 and later) is repackaged in seconds; VP9 and anything else is converted to H.264 with the hardware encoder. On an M3 or later Mac, Highest quality brings down YouTube's 4K without a conversion.</li>
+  <li><b>Compatible MP4 (H.264)</b> converts AV1 too, for files headed to older Macs, iPhones before the 15 Pro and other devices.</li>
+  <li><b>Update yt-dlp…</b> in the app fetches the latest yt-dlp release, verifies it and uses it from then on, so a site change never needs a new version of the app.</li>
+  <li>The app updates itself: <b>ShortVid ▸ Check for Updates…</b>, plus a daily automatic check.</li>
+  <li>Bundles yt-dlp, ffmpeg and Deno inside the app, signed and notarized, with a layered app icon for macOS 26 and later. Requires macOS 27 or later and an Apple silicon Mac.</li>
+</ul>
