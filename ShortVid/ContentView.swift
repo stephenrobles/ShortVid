@@ -49,6 +49,8 @@ struct ContentView: View {
                             Text("1080p").tag(VideoQuality.p1080)
                             Text("720p").tag(VideoQuality.p720)
                             Text("480p").tag(VideoQuality.p480)
+                            Divider()
+                            Text("Audio only").tag(VideoQuality.audioOnly)
                         }
                         .fixedSize()
                         Toggle("Force MP4", isOn: $tester.forceMP4)

@@ -19,7 +19,7 @@ struct DownloadVideoIntent: AppIntent {
 
     @Parameter(
         title: "Quality",
-        description: "Highest quality takes the best streams that fit the MP4 settings; 4K takes the best stream up to 2160p even when it must be converted; 1080p, 720p and 480p cap the resolution and use less space.",
+        description: "Highest quality takes the best streams that fit the MP4 settings; 4K takes the best stream up to 2160p even when it must be converted; 1080p, 720p and 480p cap the resolution and use less space. Audio only returns just the sound, as an M4A when Force MP4 is on.",
         default: .highest
     )
     var quality: VideoQuality
@@ -71,6 +71,7 @@ nonisolated enum VideoQuality: String, AppEnum {
     case p1080
     case p720
     case p480
+    case audioOnly
 
     static let typeDisplayRepresentation = TypeDisplayRepresentation(name: "Quality")
     static let caseDisplayRepresentations: [VideoQuality: DisplayRepresentation] = [
@@ -79,6 +80,7 @@ nonisolated enum VideoQuality: String, AppEnum {
         .p1080: "1080p",
         .p720: "720p",
         .p480: "480p",
+        .audioOnly: "Audio only",
     ]
 
     /// Maximum frame height in pixels, or nil for no cap.
@@ -89,8 +91,12 @@ nonisolated enum VideoQuality: String, AppEnum {
         case .p1080: return 1080
         case .p720: return 720
         case .p480: return 480
+        case .audioOnly: return nil
         }
     }
+
+    /// Just the sound track, no video.
+    var isAudioOnly: Bool { self == .audioOnly }
 
     /// Whether resolution beats codec when choosing streams. Only 4K does:
     /// sites such as YouTube offer 2160p only as VP9/AV1, which Compatible

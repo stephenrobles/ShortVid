@@ -62,7 +62,8 @@ nonisolated enum VideoDownloader {
 
         let downloaded = try await runYtdlp(ytdlp, url: url, into: jobDirectory, quality: quality, preferMP4: forceMP4, compatible: compatible)
 
-        guard forceMP4 else {
+        // Audio only: yt-dlp has already extracted the sound (to M4A with Force MP4).
+        guard forceMP4, !quality.isAudioOnly else {
             return DownloadedVideo(fileURL: downloaded, wasConverted: false, wasRemuxed: false)
         }
 
@@ -151,12 +152,20 @@ nonisolated enum VideoDownloader {
             // Print the final path (after merge/move) as the only stdout line.
             "--print", "after_move:filepath",
         ]
-        let resolutionFirst = quality.prefersResolutionOverCodec
-        if let format = formatSelector(maxHeight: quality.maxHeight, preferMP4: preferMP4, compatible: compatible, resolutionFirst: resolutionFirst) {
-            arguments += ["--format", format]
-        }
-        if resolutionFirst, let maxHeight = quality.maxHeight {
-            arguments += ["--format-sort", formatSort(maxHeight: maxHeight, preferMP4: preferMP4, compatible: compatible)]
+        if quality.isAudioOnly {
+            // Best audio stream (AAC first when an M4A is wanted), or the sound of a
+            // muxed file when that is all the site has; -x makes ffmpeg drop the video.
+            // "best" keeps the native codec; "m4a" copies AAC and transcodes anything else.
+            arguments += ["--format", preferMP4 ? "ba[acodec~='^mp4a']/ba/b" : "ba/b"]
+            arguments += ["--extract-audio", "--audio-format", preferMP4 ? "m4a" : "best", "--audio-quality", "0"]
+        } else {
+            let resolutionFirst = quality.prefersResolutionOverCodec
+            if let format = formatSelector(maxHeight: quality.maxHeight, preferMP4: preferMP4, compatible: compatible, resolutionFirst: resolutionFirst) {
+                arguments += ["--format", format]
+            }
+            if resolutionFirst, let maxHeight = quality.maxHeight {
+                arguments += ["--format-sort", formatSort(maxHeight: maxHeight, preferMP4: preferMP4, compatible: compatible)]
+            }
         }
         arguments.append(url.absoluteString)
 
