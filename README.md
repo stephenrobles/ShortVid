@@ -42,6 +42,9 @@ daily automatic check.
    This downloads the official yt-dlp macOS build, static ffmpeg/ffprobe builds from
    ffmpeg.martin-riedl.de, and the official Deno build for this Mac's architecture
    into `Vendor/bin`. Re-run it any time to pick up newer versions, then rebuild.
+   `--nightly` takes yt-dlp from its nightly builds instead of the last stable
+   release; YouTube changes often land there weeks earlier, and releases ship
+   whichever of the two is newer.
 
 2. Build and run in Xcode (or `xcodebuild -scheme ShortVid`). The
    **Bundle yt-dlp & ffmpeg** run-script phase copies the four binaries into
@@ -99,7 +102,9 @@ yt-dlp changes often as sites change, and the copy in the bundle is frozen at bu
 time. Two ways past that:
 
 - **In the app:** choose **ShortVid ▸ Update yt-dlp…** (or the button in the status
-  window). The app downloads the latest official macOS build from GitHub into
+  window). The app asks GitHub for the newest stable release and the newest nightly
+  build, downloads whichever has the higher version (nightlies are
+  `YYYY.MM.DD.HHMMSS`, so they sort after the stable date they build on) into
   `~/Library/Application Support/fm.beard.ShortVid/yt-dlp`, marks it executable,
   strips any quarantine flag, and runs `yt-dlp --version` on it before swapping it
   into place atomically. The copy it replaces is kept as `yt-dlp.previous` and put

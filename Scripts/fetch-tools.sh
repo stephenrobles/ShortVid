@@ -1,8 +1,19 @@
 #!/bin/bash
 # Downloads the yt-dlp, ffmpeg, ffprobe and deno binaries that ShortVid bundles.
-# Run from anywhere: ./Scripts/fetch-tools.sh
+# Run from anywhere: ./Scripts/fetch-tools.sh [--nightly]
+#   --nightly  takes yt-dlp from the nightly builds (yt-dlp/yt-dlp-nightly-builds)
+#              instead of the latest stable release; nightlies carry YouTube fixes
+#              weeks before the next release, and the app's updater knows both channels.
 # Binaries land in Vendor/bin (git-ignored); the build copies and signs them.
 set -euo pipefail
+
+YTDLP_REPO="yt-dlp/yt-dlp"
+for arg in "$@"; do
+  case "$arg" in
+    --nightly) YTDLP_REPO="yt-dlp/yt-dlp-nightly-builds" ;;
+    *) echo "Unknown option: $arg" >&2; exit 1 ;;
+  esac
+done
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEST="$ROOT/Vendor/bin"
@@ -16,9 +27,9 @@ mkdir -p "$DEST"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
 
-echo "→ yt-dlp (official universal macOS build)"
+echo "→ yt-dlp (official universal macOS build from $YTDLP_REPO)"
 curl -fsSL -o "$DEST/yt-dlp" \
-  "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos"
+  "https://github.com/$YTDLP_REPO/releases/latest/download/yt-dlp_macos"
 
 echo "→ ffmpeg + ffprobe (static $ARCH builds from ffmpeg.martin-riedl.de)"
 for tool in ffmpeg ffprobe; do

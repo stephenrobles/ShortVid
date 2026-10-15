@@ -134,10 +134,45 @@ nonisolated enum YtdlpUpdatePhase: Sendable, Equatable {
     case installing
 }
 
-/// Downloads the latest official yt-dlp macOS build into Application Support,
-/// checks that it runs, and swaps it into place atomically.
+/// Downloads the newest official yt-dlp macOS build into Application Support,
+/// checks that it runs, and swaps it into place atomically. Both release
+/// channels are considered: the stable releases and the nightly builds, which
+/// carry YouTube fixes weeks before the next stable release; whichever has
+/// the newer version wins.
 nonisolated enum YtdlpUpdateEngine {
-    static let downloadURL = URL(string: "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_macos")!
+    struct Channel: Sendable {
+        let name: String
+        let repository: String
+        var downloadURL: URL { URL(string: "https://github.com/\(repository)/releases/latest/download/yt-dlp_macos")! }
+        var latestReleaseAPI: URL { URL(string: "https://api.github.com/repos/\(repository)/releases/latest")! }
+    }
+    static let stable = Channel(name: "stable", repository: "yt-dlp/yt-dlp")
+    static let nightly = Channel(name: "nightly", repository: "yt-dlp/yt-dlp-nightly-builds")
+
+    /// The channel whose latest build has the higher version. Falls back to
+    /// stable when GitHub's API can't be read (it is rate-limited for
+    /// anonymous callers, so this is best effort).
+    static func newestChannel() async -> Channel {
+        async let stableTag = latestTag(of: stable)
+        async let nightlyTag = latestTag(of: nightly)
+        let (s, n) = await (stableTag, nightlyTag)
+        ytdlpLog.info("Latest yt-dlp: stable \(s ?? "?", privacy: .public), nightly \(n ?? "?", privacy: .public)")
+        if let s, let n, YtdlpVersion.isNewer(n, than: s) { return nightly }
+        if s == nil, n != nil { return nightly }
+        return stable
+    }
+
+    private static func latestTag(of channel: Channel) async -> String? {
+        var request = URLRequest(url: channel.latestReleaseAPI)
+        request.cachePolicy = .reloadIgnoringLocalCacheData
+        request.timeoutInterval = 15
+        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        guard let (data, response) = try? await URLSession.shared.data(for: request),
+              (response as? HTTPURLResponse)?.statusCode == 200,
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let tag = json["tag_name"] as? String, YtdlpVersion.looksValid(tag) else { return nil }
+        return tag
+    }
 
     static func update(progress: @escaping @Sendable (YtdlpUpdatePhase) -> Void) async throws -> YtdlpUpdateOutcome {
         let fm = FileManager.default
@@ -156,7 +191,10 @@ nonisolated enum YtdlpUpdateEngine {
         let staged = staging.appending(path: "yt-dlp")
 
         progress(.downloading(0))
-        try await download(to: staged) { progress(.downloading($0)) }
+        let channel = await newestChannel()
+        ytdlpLog.info("Downloading yt-dlp from the \(channel.name, privacy: .public) channel")
+        try Task.checkCancellation()
+        try await download(channel.downloadURL, to: staged) { progress(.downloading($0)) }
         try Task.checkCancellation()
 
         // Make it runnable: executable bit, no quarantine flag.
@@ -214,8 +252,8 @@ nonisolated enum YtdlpUpdateEngine {
 
     // MARK: Steps
 
-    private static func download(to destination: URL, progress: @escaping @Sendable (Double) -> Void) async throws {
-        var request = URLRequest(url: downloadURL)
+    private static func download(_ url: URL, to destination: URL, progress: @escaping @Sendable (Double) -> Void) async throws {
+        var request = URLRequest(url: url)
         request.cachePolicy = .reloadIgnoringLocalCacheData
         let delegate = DownloadProgressDelegate(progress: progress)
         let (temporary, response) = try await URLSession.shared.download(for: request, delegate: delegate)
