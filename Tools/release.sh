@@ -2,7 +2,8 @@
 # Builds a Release app signed with Developer ID (helpers included, via the bundle-tools.sh
 # run-script phase, and Sparkle's nested code re-signed inside-out), optionally notarizes it,
 # packages a DMG, and optionally publishes it on beardfm.app: the download for new users plus a
-# Sparkle update for existing users. Nothing here deploys the site: run `npm run deploy` there yourself.
+# Sparkle update for existing users. Nothing here publishes the site: run its scripts/publish.sh yourself
+# (commit, push to main, and `npm run fm:deploy` for beard.fm/app); the command is printed at the end.
 #
 # Usage:  Tools/release.sh [--notarize] [--publish]
 #   --notarize   uses the notarytool keychain profile in $NOTARY_PROFILE (default "ipodpromax-notary",
@@ -14,7 +15,7 @@
 #                to site/static/shortvid/appcast.xml (with release-notes/<version>.html if present).
 #                The DMG is too big for the site's static assets (25 MiB per file), so it never goes in
 #                site/static/downloads. Update the version and size on site/pages/shortvid.html by hand,
-#                then deploy the site so the appcast (and with it the update) goes live.
+#                then publish the site so the appcast (and with it the update) goes live.
 #
 # Output: dist/ShortVid <version>.dmg
 set -euo pipefail
@@ -131,7 +132,8 @@ if [[ $PUBLISH -eq 1 ]]; then
   [[ -f "$ROOT/release-notes/$VERSION.html" ]] && NOTES=("$ROOT/release-notes/$VERSION.html")
   "$ROOT/Tools/update-appcast.py" "$SITE/site/static/shortvid/appcast.xml" "$VERSION" "$BUILDNUM" "$MIN_MACOS" \
     "https://beardfm.app/downloads/$UPDATE_NAME" "$SIGNATURE" "${NOTES[@]}"
-  echo "▶ Update $VERSION ($BUILDNUM) is in site/static/shortvid/appcast.xml. Update site/pages/shortvid.html, then deploy the site (npm run deploy) to offer it."
+  echo "▶ Update $VERSION ($BUILDNUM) is in site/static/shortvid/appcast.xml. Not offered yet. Update site/pages/shortvid.html, then publish with:"
+  echo "    \"$SITE/scripts/publish.sh\" \"ShortVid $VERSION: Sparkle update\" site/static/shortvid/appcast.xml site/pages/shortvid.html"
 fi
 
 ls -la "$DMG"
